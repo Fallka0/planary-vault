@@ -26,7 +26,8 @@ export default function Plans() {
   const { plan, planSource, planUntil, reloadPlan } = useVault();
   const params = useSearchParams();
   const [billing, setBilling] = useState<BillingRecord | null | undefined>(undefined);
-  const [period, setPeriod] = useState<Period>("month");
+  // planary.ch/vault/pricing links here with the period the visitor picked.
+  const [period, setPeriod] = useState<Period>(() => (params.get("period") === "year" ? "year" : "month"));
   const [invoice, setInvoice] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
