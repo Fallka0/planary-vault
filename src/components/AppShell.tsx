@@ -31,6 +31,7 @@ export function useUploadPicker() {
 function StorageMeter({ compact }: { compact?: boolean }) {
   const { used, plan } = useVault();
   const pct = Math.min(100, (used / plan.quota) * 100);
+  const warn = pct >= 95 ? "Almost full" : pct >= 80 ? "Running out of space" : null;
   return (
     <div className="storage">
       {compact ? (
@@ -46,6 +47,28 @@ function StorageMeter({ compact }: { compact?: boolean }) {
       <div className="storage-bar" role="img" aria-label={`${Math.round(pct)}% of storage used`}>
         <div className="fill-once" style={{ width: `${Math.max(pct, used > 0 ? 1 : 0)}%` }} />
       </div>
+      {warn && !compact && used <= plan.quota && (
+        <span className="storage-warn">
+          {warn} · <Link href="/plans">See plans</Link>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Over the plan's storage (after a downgrade or an overdue invoice): readable, but no new uploads. */
+function OverQuota() {
+  const { used, plan, planSource } = useVault();
+  if (used <= plan.quota) return null;
+  return (
+    <div className="banner" role="status">
+      <span>
+        <b>You&apos;re over the {formatBytes(plan.quota)} of {plan.name}.</b>{" "}
+        {planSource === "overdue" ? "An invoice is overdue. " : ""}Your files stay readable and downloadable; new uploads are paused until there&apos;s room.
+      </span>
+      <Link href="/plans" className="pill pill-primary pill-md">
+        See plans
+      </Link>
     </div>
   );
 }
@@ -279,6 +302,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </div>
+        <OverQuota />
         {children}
       </section>
       <div className="m-dock m-only">

@@ -7,6 +7,8 @@
     { "binding": "DB", "database_name": "planary-vault", "database_id": "b9f52f54-2658-42ae-9297-5f262479769f", "migrations_dir": "api/migrations" }
   ],
   "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "planary-vault-blobs" }],
+  // Daily: empty the Trash after 30 days, drop old versions past the plan's history.
+  "triggers": { "crons": ["0 3 * * *"] },
   "vars": {
     "ALLOWED_ORIGINS": "https://vault.planary.ch"
   }

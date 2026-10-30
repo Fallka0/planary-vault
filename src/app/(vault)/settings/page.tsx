@@ -9,9 +9,9 @@ import { ConfirmDialog, Dialog } from "@/components/Dialog";
 import { RecoveryKeyPanel } from "@/components/RecoveryKey";
 import { ArrowRight } from "@/components/Icons";
 import { api, deviceId, type DeviceRecord } from "@/lib/api";
-import { ACCOUNT_URL, PRICING_URL } from "@/lib/auth";
+import { ACCOUNT_URL } from "@/lib/auth";
 import { MIN_PASSPHRASE, newRecoveryKey, passphraseStrength } from "@/lib/crypto";
-import { fileFamily, formatBytes, formatSeen, initials } from "@/lib/format";
+import { fileFamily, formatBytes, formatDay, formatSeen, initials } from "@/lib/format";
 import { PLANS } from "../../../../shared/plans";
 
 type Section = "account" | "security" | "storage";
@@ -290,7 +290,7 @@ function NewRecoveryKey({ value, email, onSave, onClose }: { value: string; emai
 }
 
 function Storage() {
-  const { used, plan, items } = useVault();
+  const { used, plan, items, planSource, planUntil, retentionUntil } = useVault();
   // The server only knows byte counts; which bytes are images is known here, after decryption.
   const split = useMemo(() => {
     let images = 0;
@@ -339,13 +339,30 @@ function Storage() {
           </span>
         </div>
       </section>
+      {retentionUntil && (
+        <p className="pricing-note">Older versions are kept by your previous plan&apos;s rules until {formatDay(retentionUntil)}. After that, {plan.name} keeps {plan.versionDays} days of them.</p>
+      )}
       <div className="plans">
         <section className="plan">
           <span className="chip">Current plan</span>
           <b>{plan.name}</b>
           <span>
-            {formatBytes(plan.quota)} · {plan.monthly ? `CHF ${plan.monthly} per month` : "Free"}
+            {formatBytes(plan.quota)} ·{" "}
+            {planSource === "override"
+              ? "Set by Planary"
+              : planSource === "overdue"
+                ? "Vault Free until an overdue invoice is paid"
+                : planUntil
+                  ? `Ends ${formatDay(planUntil)}`
+                  : plan.monthly
+                    ? "Billed through your Planary account"
+                    : "Free"}
           </span>
+          {plan.id !== "free" && planSource === "subscription" && (
+            <Link href="/plans" className="text-link" style={{ alignSelf: "flex-start", fontSize: 14 }}>
+              Manage plan
+            </Link>
+          )}
         </section>
         {next && (
           <section className="plan plan-light">
@@ -353,9 +370,9 @@ function Storage() {
             <span>
               {formatBytes(next.quota)} · CHF {next.monthly} per month
             </span>
-            <a href={PRICING_URL} className="pill pill-md">
+            <Link href="/plans" className="pill pill-md">
               See plans
-            </a>
+            </Link>
           </section>
         )}
       </div>

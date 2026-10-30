@@ -61,6 +61,8 @@ export interface UploadItem {
   parentId: string | null;
   existing?: Item;
   error?: string;
+  /** Failed on a plan limit (storage or file size). */
+  limit?: boolean;
 }
 
 type Status = "loading" | "setup" | "locked" | "unlocked";
@@ -71,6 +73,11 @@ interface VaultState {
   plan: Plan;
   used: number;
   autoLockMinutes: number;
+  planSource: VaultRecord["planSource"];
+  planUntil: number | null;
+  retentionUntil: number | null;
+  /** Asks again right away, e.g. after coming back from checkout. */
+  reloadPlan: () => Promise<void>;
   items: Item[];
   byId: Map<string, Item>;
   refresh: () => Promise<void>;
@@ -163,7 +170,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     if (status === "setup" && !pathname.startsWith("/setup")) router.replace("/setup");
     else if (status === "setup" && pathname === "/setup/recovery" && !setupPassphrase) router.replace("/setup");
     else if (status === "locked" && pathname !== "/unlock") {
-      intended.current = pathname;
+      // Keep the query too: /plans?checkout=done comes back from paying to a locked vault.
+      intended.current = `${pathname}${window.location.search}`;
       router.replace("/unlock");
     } else if (status === "unlocked" && OPEN_PATHS.includes(pathname)) router.replace(intended.current || "/");
   }, [status, pathname, router, setupPassphrase]);
@@ -310,7 +318,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         wrappedPrivateKey: await seal(m, keys.privatePkcs8),
       };
       await api("/vault", { method: "POST", body });
-      const rec: VaultRecord = { ...body, autoLockMinutes: 15, plan: "free", createdAt: Date.now() };
+      const rec: VaultRecord = { ...body, autoLockMinutes: 15, plan: "free", planSource: "default", planUntil: null, retentionUntil: null, createdAt: Date.now() };
       setRecord(rec);
       setSetupPassphrase(null);
       intended.current = "/";
@@ -348,6 +356,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     },
     [record],
   );
+
+  const reloadPlan = useCallback(async () => {
+    const res = await api<{ vault?: VaultRecord }>("/vault?refresh=1");
+    if (!res.vault) return;
+    const fresh = res.vault;
+    setRecord((r) => (r ? { ...r, plan: fresh.plan, planSource: fresh.planSource, planUntil: fresh.planUntil, retentionUntil: fresh.retentionUntil } : r));
+    setPlanId(fresh.plan);
+  }, []);
 
   // ── Auto-lock after idle
   const autoLockMinutes = record?.autoLockMinutes ?? 15;
@@ -460,7 +476,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         } catch (error) {
           if ((error as Error).name === "AbortError") continue;
           const message = (error as Error).message;
-          patchUpload(next.id, { state: "failed", error: /full|too large/.test(message) ? message : "Upload failed" });
+          // Plan limits get a way to more room instead of a retry.
+          if (message === "vault is full") patchUpload(next.id, { state: "failed", error: "Your vault is full", limit: true });
+          else if (message === "file too large for your plan") patchUpload(next.id, { state: "failed", error: "Too large for your plan", limit: true });
+          else patchUpload(next.id, { state: "failed", error: "Upload failed" });
         } finally {
           controllers.current.delete(next.id);
         }
@@ -506,6 +525,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     plan: planOf(planId),
     used,
     autoLockMinutes,
+    planSource: record?.planSource ?? "default",
+    planUntil: record?.planUntil ?? null,
+    retentionUntil: record?.retentionUntil ?? null,
+    reloadPlan,
     items,
     byId,
     refresh,

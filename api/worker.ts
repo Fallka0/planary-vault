@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { CHUNK_SIZE, TAG_SIZE, planOf } from "../shared/plans";
+import { appUrl, BillingError, cleanup, orgCall, syncPlan, type PlanRow } from "./plans";
 
 /**
  * The Vault API.
@@ -250,8 +251,7 @@ function requireEdit(a: Access) {
 }
 
 async function vaultOf(env: Env, userId: string) {
-  return env.DB.prepare("SELECT * FROM vaults WHERE user_id = ?").bind(userId).first<{
-    user_id: string;
+  return env.DB.prepare("SELECT * FROM vaults WHERE user_id = ?").bind(userId).first<PlanRow & {
     email: string;
     name: string;
     kdf: string;
@@ -260,7 +260,6 @@ async function vaultOf(env: Env, userId: string) {
     public_key: string;
     wrapped_private_key: string;
     auto_lock_minutes: number;
-    plan: string;
     created_at: number;
   }>();
 }
@@ -493,8 +492,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
   // ── The vault itself
   if (at("vault") && method === "GET") {
-    const vault = await vaultOf(env, user.id);
-    if (!vault) return json({ exists: false, user });
+    const stored = await vaultOf(env, user.id);
+    if (!stored) return json({ exists: false, user });
+    // ?refresh after coming back from checkout: ask planary-org now rather than in a few minutes.
+    const vault = await syncPlan(env, stored, url.searchParams.has("refresh"));
     if (vault.name !== user.name || vault.email !== user.email) {
       ctx.waitUntil(env.DB.prepare("UPDATE vaults SET name = ?, email = ? WHERE user_id = ?").bind(user.name, user.email, user.id).run());
     }
@@ -509,9 +510,42 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
         wrappedPrivateKey: vault.wrapped_private_key,
         autoLockMinutes: vault.auto_lock_minutes,
         plan: vault.plan,
+        planSource: vault.plan_source ?? "default",
+        planUntil: vault.plan_until,
+        retentionUntil: vault.retention_until && vault.retention_until > Date.now() ? vault.retention_until : null,
         createdAt: vault.created_at,
       },
     });
+  }
+
+  // ── Plans: billed by planary-org, asked as the person themselves
+  if (at("billing") && method === "GET") {
+    const vault = await syncPlan(env, await requireVault(env, user));
+    if (!vault.billing_org || vault.plan_source !== "subscription") return json({ billing: null });
+    const data = await orgCall<{ vault: unknown }>(env, request, `/orgs/${encodeURIComponent(vault.billing_org)}/billing`);
+    return json({ billing: data.vault, orgId: vault.billing_org });
+  }
+
+  if (at("billing", "checkout") && method === "POST") {
+    await requireVault(env, user);
+    const b = await body(request);
+    const res = await orgCall<{ url: string }>(env, request, "/checkout", {
+      product: "vault",
+      plan: b.plan,
+      period: b.period,
+      payBy: b.payBy,
+      returnTo: `${appUrl(env)}/plans?checkout=done`,
+    });
+    return json({ url: res.url });
+  }
+
+  if (parts[0] === "billing" && method === "POST" && (at("billing", "change") || at("billing", "cancel") || at("billing", "cancel", "undo"))) {
+    const vault = await syncPlan(env, await requireVault(env, user));
+    if (!vault.billing_org) throw new HttpError(409, "no subscription");
+    const path = at("billing", "change") ? "vault/change" : at("billing", "cancel") ? "vault/cancel" : "vault/cancel/undo";
+    const res = await orgCall<Json>(env, request, `/orgs/${encodeURIComponent(vault.billing_org)}/${path}`, at("billing", "change") ? await body(request) : {});
+    await syncPlan(env, vault, true);
+    return json(res);
   }
 
   if (at("vault") && method === "POST") {
@@ -1027,7 +1061,7 @@ export default {
     try {
       response = await route(request, env, ctx);
     } catch (error) {
-      if (error instanceof HttpError) response = json({ error: error.message }, error.status);
+      if (error instanceof HttpError || error instanceof BillingError) response = json({ error: error.message }, error.status);
       else {
         console.error(error);
         response = json({ error: "something went wrong" }, 500);
@@ -1040,5 +1074,9 @@ export default {
       headers.set(k, v);
     }
     return new Response(response.body, { status: response.status, headers });
+  },
+
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(cleanup(env, (id) => deleteNodeTree(env, id)));
   },
 } satisfies ExportedHandler<Env>;

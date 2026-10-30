@@ -1,5 +1,6 @@
 export const AUTH_BASE_URL = process.env.NEXT_PUBLIC_AUTH_BASE_URL || "https://auth.planary.ch";
 export const PLANARY_URL = process.env.NEXT_PUBLIC_PLANARY_URL || "https://planary.ch";
+export const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || "https://portal.planary.ch";
 
 /** `auto` = single sign-on: an existing Planary session comes straight back without a click. */
 export function buildAuthUrl(mode: "login" | "signup", returnTo: string, auto = false) {
@@ -18,4 +19,6 @@ export function signOutUrl() {
 /** Name, email and two-factor all live in the Planary account. */
 export const ACCOUNT_URL = `${AUTH_BASE_URL}/account`;
 export const PRICING_URL = `${PLANARY_URL}/vault/pricing`;
+/** Invoices, payment method and billing contact, for every Planary product. */
+export const BILLING_URL = `${PORTAL_URL}/abrechnung`;
 export const PRODUCT_URL = `${PLANARY_URL}/vault`;

@@ -85,7 +85,23 @@ export interface VaultRecord {
   wrappedPrivateKey: string;
   autoLockMinutes: number;
   plan: string;
+  /** Where the plan comes from: a subscription, set by Planary staff, Free because an invoice is overdue, or the default. */
+  planSource: "subscription" | "override" | "overdue" | "default";
+  /** Cancelling: the day it falls back to Vault Free. */
+  planUntil: number | null;
+  /** After a downgrade: older versions are kept by the old plan's rules until then. */
+  retentionUntil: number | null;
   createdAt: number;
+}
+
+/** The Vault subscription as planary-org bills it; null without one. */
+export interface BillingRecord {
+  current: "free" | "plus" | "pro";
+  period: "month" | "year" | null;
+  payBy: "card" | "invoice" | null;
+  renewsAt: number | null;
+  cancelAt: number | null;
+  pending: { plan: "plus" | "pro"; period: "month" | "year" } | null;
 }
 
 export interface VaultUser {

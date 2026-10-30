@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useVault, type Item } from "./VaultProvider";
 import { Dialog } from "./Dialog";
 import { api, ApiError, type LinkRecord, type ShareRecord } from "@/lib/api";
@@ -199,6 +200,14 @@ export function ShareDialog({ item, onClose }: { item: Item; onClose: () => void
                   />
                 </div>
               </div>
+              {plan.id !== "pro" && (
+                <p className="hint">
+                  {plan.name} links last up to {plan.linkDays} days and {plan.linkDownloads} downloads.{" "}
+                  <Link href="/plans" className="text-link">
+                    {plan.id === "free" ? "Up to a year with Vault Plus" : "No limits with Vault Pro"}
+                  </Link>
+                </p>
+              )}
               <div className="actions" style={{ marginTop: 4 }}>
                 <button type="button" className="pill pill-primary" style={{ padding: "0 22px" }} disabled={creating} onClick={() => void createLink()}>
                   Create link

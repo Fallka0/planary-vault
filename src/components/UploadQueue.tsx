@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useVault } from "./VaultProvider";
 import { Alert, Check, Close } from "./Icons";
 import { formatProgress } from "@/lib/format";
@@ -41,9 +42,15 @@ export function UploadQueue() {
                     {u.error ?? "Upload failed"}
                   </span>
                 </div>
-                <button type="button" className="pill pill-primary" style={{ height: 34, padding: "0 14px", fontSize: 13 }} onClick={() => retryUpload(u.id)}>
-                  Retry
-                </button>
+                {u.limit ? (
+                  <Link href="/plans" className="pill pill-primary" style={{ height: 34, padding: "0 14px", fontSize: 13 }}>
+                    See plans
+                  </Link>
+                ) : (
+                  <button type="button" className="pill pill-primary" style={{ height: 34, padding: "0 14px", fontSize: 13 }} onClick={() => retryUpload(u.id)}>
+                    Retry
+                  </button>
+                )}
               </li>
             );
           }
