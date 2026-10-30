@@ -52,6 +52,8 @@ export async function uploadFile(opts: {
   file: File;
   masterKey: CryptoKey;
   parentId: string | null;
+  /** Key of the folder it goes into, so whoever that folder is shared with can open it too. */
+  parentKey?: CryptoKey;
   /** Upload a new version of this file instead of a new file. */
   existing?: { id: string; key: CryptoKey; meta: FileMeta };
   tags?: string[];
@@ -79,6 +81,7 @@ export async function uploadFile(opts: {
       parentId: opts.parentId,
       encMeta: await sealJson(key, meta),
       wrappedKey: opts.existing ? undefined : await wrapKey(opts.masterKey, key),
+      parentKey: !opts.existing && opts.parentKey ? await wrapKey(opts.parentKey, key) : undefined,
       size: file.size,
       nonce: toB64(nonce),
     },

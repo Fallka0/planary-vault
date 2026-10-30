@@ -174,12 +174,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const p = pair.current;
     if (!m || !p) return;
     const res = await api<NodesResponse>("/nodes");
-    const decrypt = async (n: NodeRecord): Promise<Item | null> => {
-      const sig = `${n.encMeta}|${n.wrappedKey ?? n.sealedKey}|${n.version}|${n.updatedAt}|${n.trashedAt}|${n.parentId}|${n.sharedWith.join(",")}|${n.totalSize}`;
+    const decrypt = async (n: NodeRecord, openKey: () => Promise<CryptoKey>): Promise<Item | null> => {
+      const sig = `${n.encMeta}|${n.wrappedKey ?? n.sealedKey ?? n.parentKey}|${n.role}|${n.version}|${n.updatedAt}|${n.trashedAt}|${n.parentId}|${n.sharedWith.join(",")}|${n.totalSize}`;
       const hit = cache.current.get(n.id);
       if (hit?.sig === sig) return hit.item;
       try {
-        const key = n.sealedKey ? await openFromSender(n.sealedKey, p) : await unwrapKey(m, n.wrappedKey!);
+        const key = await openKey();
         const meta = await openJson<FileMeta & FolderMeta>(key, n.encMeta);
         const item: Item = {
           id: n.id,
@@ -207,8 +207,33 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
     };
-    const all = await Promise.all([...res.nodes, ...res.shared].map(decrypt));
-    setItems(all.filter((i): i is Item => i !== null));
+    const own = (await Promise.all(res.nodes.map((n) => decrypt(n, () => unwrapKey(m, n.wrappedKey!))))).filter((i): i is Item => i !== null);
+
+    // Shared with you: a node shared directly opens with your private key, anything inside a
+    // shared folder with its parent's key, so they open one folder level at a time.
+    const shared = new Map<string, Item>();
+    let pending = res.shared;
+    while (pending.length) {
+      const ready = pending.filter((n) => n.sealedKey || (n.parentId && shared.has(n.parentId)));
+      if (!ready.length) break;
+      const opened = await Promise.all(
+        ready.map((n) => decrypt(n, () => (n.sealedKey ? openFromSender(n.sealedKey, p) : unwrapKey(shared.get(n.parentId!)!.key, n.parentKey!)))),
+      );
+      for (const item of opened) if (item) shared.set(item.id, item);
+      pending = pending.filter((n) => !ready.includes(n));
+    }
+
+    // Nodes from before folder sharing have no parent-wrapped key yet; add it so sharing a folder reaches them.
+    const ownById = new Map(own.map((i) => [i.id, i]));
+    const missing = res.nodes.filter((n) => n.parentId && !n.parentKey && ownById.has(n.id) && ownById.has(n.parentId));
+    for (let i = 0; i < missing.length; i += 500) {
+      const keys = await Promise.all(
+        missing.slice(i, i + 500).map(async (n) => ({ id: n.id, parentKey: await wrapKey(ownById.get(n.parentId!)!.key, ownById.get(n.id)!.key) })),
+      );
+      await api("/nodes/parent-keys", { method: "POST", body: { keys } });
+    }
+
+    setItems([...own, ...shared.values()]);
     setUsed(res.usage.used);
     setPlanId(res.usage.plan);
   }, []);
@@ -343,13 +368,24 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, [status, autoLockMinutes, lock]);
 
   // ── Files and folders
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
   const createFolder = useCallback(
     async (name: string, parentId: string | null) => {
       if (!master.current) throw new Error("locked");
       const key = await newAesKey();
+      const parent = parentId ? itemsRef.current.find((i) => i.id === parentId) : undefined;
       const { id } = await api<{ id: string }>("/folders", {
         method: "POST",
-        body: { parentId, encMeta: await sealJson(key, { name } satisfies FolderMeta), wrappedKey: await wrapKey(master.current, key) },
+        body: {
+          parentId,
+          encMeta: await sealJson(key, { name } satisfies FolderMeta),
+          wrappedKey: await wrapKey(master.current, key),
+          parentKey: parent ? await wrapKey(parent.key, key) : undefined,
+        },
       });
       await refresh();
       return id;
@@ -412,6 +448,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
             file: next.file,
             masterKey: master.current,
             parentId: next.parentId,
+            parentKey: next.parentId ? itemsRef.current.find((i) => i.id === next.parentId)?.key : undefined,
             existing: next.existing ? { id: next.existing.id, key: next.existing.key, meta: next.existing.meta as FileMeta } : undefined,
             signal: controller.signal,
             onProgress: (phase, done, total) => patchUpload(next.id, { state: phase, done, total }),
@@ -438,10 +475,13 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, [uploads, pump]);
 
   const enqueue = useCallback((files: File[], parentId: string | null, existing?: Item) => {
+    // New files can only go into your own folders; in a shared one only new versions are allowed.
+    const foreign = !existing && !!parentId && !!itemsRef.current.find((i) => i.id === parentId)?.incoming;
     const added = files.map<UploadItem>((file) => ({
       id: crypto.randomUUID(),
       name: existing?.name ?? file.name,
-      state: "waiting",
+      state: foreign ? "failed" : "waiting",
+      error: foreign ? "Shared folders only take new versions" : undefined,
       done: 0,
       total: file.size,
       file,

@@ -100,7 +100,10 @@ export interface NodeRecord {
   kind: "file" | "folder";
   encMeta: string;
   wrappedKey: string | null;
-  sealedKey?: string;
+  /** The node key wrapped by its parent folder's key (null at the top level). */
+  parentKey: string | null;
+  /** Set on nodes shared with you directly; the rest of a shared folder opens through parentKey. */
+  sealedKey?: string | null;
   role?: "view" | "edit";
   ownerName?: string;
   version: number;

@@ -188,6 +188,8 @@ interface NodeRow {
   kind: "file" | "folder";
   enc_meta: string;
   wrapped_key: string;
+  /** The node key wrapped by its parent folder's key; how shared folders reach their contents. */
+  parent_key: string | null;
   version: number;
   created_at: number;
   updated_at: number;
@@ -200,12 +202,43 @@ async function access(env: Env, user: User, nodeId: string): Promise<Access> {
   const node = await env.DB.prepare("SELECT * FROM nodes WHERE id = ?").bind(nodeId).first<NodeRow>();
   if (!node) throw new HttpError(404, "not found");
   if (node.owner_id === user.id) return { node, role: "owner" };
-  if (node.trashed_at) throw new HttpError(404, "not found");
-  const share = await env.DB.prepare("SELECT role FROM shares WHERE node_id = ? AND recipient_id = ?")
-    .bind(nodeId, user.id)
-    .first<{ role: "view" | "edit" }>();
-  if (!share) throw new HttpError(404, "not found");
-  return { node, role: share.role };
+  // Shared directly or through a folder above it: walk up until something is in the trash.
+  // Any edit share on the way wins, the same rule the file list uses.
+  const chain = await env.DB.prepare(
+    `WITH RECURSIVE up(id, parent_id, trashed_at, depth) AS (
+       SELECT id, parent_id, trashed_at, 0 FROM nodes WHERE id = ?
+       UNION ALL
+       SELECT n.id, n.parent_id, n.trashed_at, up.depth + 1 FROM nodes n JOIN up ON n.id = up.parent_id WHERE up.depth < ?
+     )
+     SELECT up.trashed_at, s.role FROM up LEFT JOIN shares s ON s.node_id = up.id AND s.recipient_id = ? ORDER BY up.depth`,
+  )
+    .bind(nodeId, MAX_DEPTH, user.id)
+    .all<{ trashed_at: number | null; role: "view" | "edit" | null }>();
+  let role: "view" | "edit" | null = null;
+  for (const row of chain.results) {
+    if (row.trashed_at) break;
+    if (row.role) role = role === "edit" ? "edit" : row.role;
+  }
+  if (!role) throw new HttpError(404, "not found");
+  return { node, role };
+}
+
+/** Folder trees deeper than this are cut off; it also stops a cycle from running forever. */
+const MAX_DEPTH = 64;
+
+/** Whether `folderId` is `nodeId` or somewhere inside it. */
+async function isInside(env: Env, folderId: string, nodeId: string): Promise<boolean> {
+  const hit = await env.DB.prepare(
+    `WITH RECURSIVE up(id, parent_id, depth) AS (
+       SELECT id, parent_id, 0 FROM nodes WHERE id = ?
+       UNION ALL
+       SELECT n.id, n.parent_id, up.depth + 1 FROM nodes n JOIN up ON n.id = up.parent_id WHERE up.depth < ?
+     )
+     SELECT 1 FROM up WHERE id = ?`,
+  )
+    .bind(folderId, MAX_DEPTH, nodeId)
+    .first();
+  return !!hit;
 }
 
 function requireOwner(a: Access) {
@@ -301,6 +334,7 @@ function serializeNode(n: NodeRow & { size?: number | null; total?: number | nul
     kind: n.kind,
     encMeta: n.enc_meta,
     wrappedKey: n.wrapped_key,
+    parentKey: n.parent_key,
     version: n.version,
     size: n.size ?? 0,
     totalSize: n.total ?? 0,
@@ -329,25 +363,45 @@ async function listNodes(env: Env, user: User) {
   const sharedWith = new Map<string, string[]>();
   for (const s of sharesOut.results) sharedWith.set(s.node_id, [...(sharedWith.get(s.node_id) ?? []), s.name]);
 
+  // Everything shared with this person: the shared nodes themselves (depth 0, key sealed to them)
+  // and, below shared folders, everything that isn't in the trash (key wrapped by the parent).
   const incoming = await env.DB.prepare(
-    `SELECT n.*, s.role, s.sealed_key, o.name AS owner_name,
+    `WITH RECURSIVE tree(id, role, depth) AS (
+       SELECT s.node_id, s.role, 0 FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.recipient_id = ? AND n.trashed_at IS NULL
+       UNION ALL
+       SELECT n.id, tree.role, tree.depth + 1 FROM nodes n JOIN tree ON n.parent_id = tree.id WHERE n.trashed_at IS NULL AND tree.depth < ?
+     )
+     SELECT n.*, tree.role, tree.depth, s.sealed_key, o.name AS owner_name,
        (SELECT size FROM versions WHERE node_id = n.id AND n = n.version) AS size
-     FROM shares s JOIN nodes n ON n.id = s.node_id JOIN vaults o ON o.user_id = n.owner_id
-     WHERE s.recipient_id = ? AND n.trashed_at IS NULL`,
+     FROM tree JOIN nodes n ON n.id = tree.id JOIN vaults o ON o.user_id = n.owner_id
+     LEFT JOIN shares s ON tree.depth = 0 AND s.node_id = n.id AND s.recipient_id = ?`,
   )
-    .bind(user.id)
-    .all<NodeRow & { role: "view" | "edit"; sealed_key: string; owner_name: string; size: number | null }>();
+    .bind(user.id, MAX_DEPTH, user.id)
+    .all<NodeRow & { role: "view" | "edit"; depth: number; sealed_key: string | null; owner_name: string; size: number | null }>();
+
+  // A node can turn up more than once (shared itself and inside a shared folder, or nested shares).
+  type Incoming = (typeof incoming.results)[number];
+  const seen = new Map<string, { row: Incoming; inTree: boolean; sealedKey: string | null; role: "view" | "edit" }>();
+  for (const row of incoming.results) {
+    const at = seen.get(row.id) ?? { row, inTree: false, sealedKey: null, role: row.role };
+    if (row.depth > 0) at.inTree = true;
+    if (row.sealed_key) at.sealedKey = row.sealed_key;
+    if (row.role === "edit") at.role = "edit";
+    seen.set(row.id, at);
+  }
 
   const plan = planOf(vault.plan);
   return {
     nodes: own.results.map((n) => ({ ...serializeNode(n), sharedWith: sharedWith.get(n.id) ?? [] })),
-    shared: incoming.results.map((n) => ({
-      ...serializeNode(n),
-      parentId: null,
+    shared: [...seen.values()].map(({ row, inTree, sealedKey, role }) => ({
+      ...serializeNode(row),
+      // Top-level shares show up loose under "Shared with me"; the rest keep their folder.
+      parentId: inTree ? row.parent_id : null,
       wrappedKey: null,
-      sealedKey: n.sealed_key,
-      role: n.role,
-      ownerName: n.owner_name,
+      parentKey: inTree ? row.parent_key : null,
+      sealedKey,
+      role,
+      ownerName: row.owner_name,
       sharedWith: [],
     })),
     usage: { used: await usage(env, user.id), plan: plan.id },
@@ -533,9 +587,18 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const id = newId();
     const now = Date.now();
     await env.DB.prepare(
-      "INSERT INTO nodes (id, owner_id, parent_id, kind, enc_meta, wrapped_key, created_at, updated_at) VALUES (?, ?, ?, 'folder', ?, ?, ?, ?)",
+      "INSERT INTO nodes (id, owner_id, parent_id, kind, enc_meta, wrapped_key, parent_key, created_at, updated_at) VALUES (?, ?, ?, 'folder', ?, ?, ?, ?, ?)",
     )
-      .bind(id, user.id, parentId, blob(b.encMeta, "encMeta"), blob(b.wrappedKey, "wrappedKey"), now, now)
+      .bind(
+        id,
+        user.id,
+        parentId,
+        blob(b.encMeta, "encMeta"),
+        blob(b.wrappedKey, "wrappedKey"),
+        parentId ? blob(b.parentKey, "parentKey") : null,
+        now,
+        now,
+      )
       .run();
     return json({ id }, 201);
   }
@@ -556,10 +619,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       if (parentId) {
         const parent = await access(env, user, parentId);
         requireOwner(parent);
-        if (parent.node.kind !== "folder" || parentId === a.node.id) throw new HttpError(400, "invalid parentId");
+        if (parent.node.kind !== "folder" || (await isInside(env, parentId, a.node.id))) throw new HttpError(400, "invalid parentId");
       }
-      sets.push("parent_id = ?");
-      values.push(parentId);
+      sets.push("parent_id = ?", "parent_key = ?");
+      values.push(parentId, parentId ? blob(b.parentKey, "parentKey") : null);
     }
     if (b.trashed !== undefined) {
       requireOwner(a);
@@ -572,6 +635,21 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     await env.DB.prepare(`UPDATE nodes SET ${sets.join(", ")} WHERE id = ?`)
       .bind(...values, a.node.id)
       .run();
+    return json({ ok: true });
+  }
+
+  // Parent-wrapped keys for nodes created before folder sharing; the owner's browser sends them after unlock.
+  if (at("nodes", "parent-keys") && method === "POST") {
+    const { keys } = await body<{ keys?: { id?: unknown; parentKey?: unknown }[] }>(request);
+    if (!Array.isArray(keys) || keys.length > 500) throw new HttpError(400, "invalid keys");
+    const statements = keys.map((k) =>
+      env.DB.prepare("UPDATE nodes SET parent_key = ? WHERE id = ? AND owner_id = ? AND parent_id IS NOT NULL AND parent_key IS NULL").bind(
+        blob(k.parentKey, "parentKey"),
+        optionalId(k.id, "id"),
+        user.id,
+      ),
+    );
+    if (statements.length) await env.DB.batch(statements);
     return json({ ok: true });
   }
 
@@ -597,6 +675,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     let nodeId: string;
     let parentId: string | null = null;
     let wrappedKey: string | null = null;
+    let parentKey: string | null = null;
     if (existing) {
       const a = await access(env, user, existing);
       requireEdit(a);
@@ -607,13 +686,14 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       if (parentId) requireOwner(await access(env, user, parentId));
       nodeId = newId();
       wrappedKey = blob(b.wrappedKey, "wrappedKey");
+      if (parentId) parentKey = blob(b.parentKey, "parentKey");
     }
     const id = newId();
     const blobKey = `${nodeId}/${newId()}`;
     const multipart = await env.BLOBS.createMultipartUpload(blobKey);
     await env.DB.prepare(
-      `INSERT INTO uploads (id, user_id, node_id, is_new, parent_id, enc_meta, wrapped_key, nonce, size, blob_key, r2_upload_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO uploads (id, user_id, node_id, is_new, parent_id, enc_meta, wrapped_key, parent_key, nonce, size, blob_key, r2_upload_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         id,
@@ -623,6 +703,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
         parentId,
         blob(b.encMeta, "encMeta"),
         wrappedKey,
+        parentKey,
         blob(b.nonce, "nonce", 64),
         size,
         blobKey,
@@ -641,6 +722,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       parent_id: string | null;
       enc_meta: string;
       wrapped_key: string | null;
+      parent_key: string | null;
       nonce: string;
       size: number;
       blob_key: string;
@@ -672,8 +754,8 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       if (upload.is_new) {
         statements.push(
           env.DB.prepare(
-            "INSERT INTO nodes (id, owner_id, parent_id, kind, enc_meta, wrapped_key, version, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, 1, ?, ?)",
-          ).bind(upload.node_id, user.id, upload.parent_id, upload.enc_meta, upload.wrapped_key, now, now),
+            "INSERT INTO nodes (id, owner_id, parent_id, kind, enc_meta, wrapped_key, parent_key, version, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, ?, 1, ?, ?)",
+          ).bind(upload.node_id, user.id, upload.parent_id, upload.enc_meta, upload.wrapped_key, upload.parent_key, now, now),
         );
       } else {
         const node = await env.DB.prepare("SELECT version FROM nodes WHERE id = ?").bind(upload.node_id).first<{ version: number }>();
@@ -847,7 +929,6 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (at("nodes", ":id", "shares") && method === "POST") {
     const a = await access(env, user, parts[1]);
     requireOwner(a);
-    if (a.node.kind !== "file") throw new HttpError(400, "only files can be shared");
     const b = await body(request);
     const recipient = await vaultOf(env, String(b.recipientId ?? ""));
     if (!recipient || recipient.user_id === user.id) throw new HttpError(404, "no such person");

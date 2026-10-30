@@ -49,6 +49,8 @@ export function ShareDialog({ item, onClose }: { item: Item; onClose: () => void
   const [inviting, setInviting] = useState(false);
 
   const [now] = useState(Date.now);
+  // Links carry one file's key; folders are shared with people only.
+  const folder = item.kind === "folder";
   const maxDays = plan.linkDays;
   const [password, setPassword] = useState("");
   const [expires, setExpires] = useState(() => isoDay(now + 7 * DAY));
@@ -119,7 +121,7 @@ export function ShareDialog({ item, onClose }: { item: Item; onClose: () => void
   const dead = links.filter((l) => !live.includes(l));
 
   return (
-    <Dialog title="Share file" onClose={onClose}>
+    <Dialog title={folder ? "Share folder" : "Share file"} onClose={onClose}>
       <div className="share-cols">
         <div className="share-left">
           <section>
@@ -160,47 +162,51 @@ export function ShareDialog({ item, onClose }: { item: Item; onClose: () => void
               </p>
             )}
           </section>
-          <section>
-            <h3>With a link</h3>
-            <div className="link-grid">
-              <div className="field">
-                <label htmlFor="lpw">Password</label>
-                <input id="lpw" className="input" type="password" autoComplete="new-password" placeholder="Optional" value={password} onChange={(e) => setPassword(e.target.value)} />
+          {folder ? (
+            <p className="hint">People you invite see everything in this folder, including files added later.</p>
+          ) : (
+            <section>
+              <h3>With a link</h3>
+              <div className="link-grid">
+                <div className="field">
+                  <label htmlFor="lpw">Password</label>
+                  <input id="lpw" className="input" type="password" autoComplete="new-password" placeholder="Optional" value={password} onChange={(e) => setPassword(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label htmlFor="exp">Expires</label>
+                  <input
+                    id="exp"
+                    className="input"
+                    type="date"
+                    min={isoDay(now + DAY)}
+                    max={maxDays ? isoDay(now + maxDays * DAY) : undefined}
+                    required={maxDays !== null}
+                    value={expires}
+                    onChange={(e) => setExpires(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="lim">Download limit</label>
+                  <input
+                    id="lim"
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={plan.linkDownloads ?? undefined}
+                    placeholder={plan.linkDownloads ? undefined : "Unlimited"}
+                    value={limit}
+                    onChange={(e) => setLimit(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="field">
-                <label htmlFor="exp">Expires</label>
-                <input
-                  id="exp"
-                  className="input"
-                  type="date"
-                  min={isoDay(now + DAY)}
-                  max={maxDays ? isoDay(now + maxDays * DAY) : undefined}
-                  required={maxDays !== null}
-                  value={expires}
-                  onChange={(e) => setExpires(e.target.value)}
-                />
+              <div className="actions" style={{ marginTop: 4 }}>
+                <button type="button" className="pill pill-primary" style={{ padding: "0 22px" }} disabled={creating} onClick={() => void createLink()}>
+                  Create link
+                </button>
               </div>
-              <div className="field">
-                <label htmlFor="lim">Download limit</label>
-                <input
-                  id="lim"
-                  className="input"
-                  type="number"
-                  min={1}
-                  max={plan.linkDownloads ?? undefined}
-                  placeholder={plan.linkDownloads ? undefined : "Unlimited"}
-                  value={limit}
-                  onChange={(e) => setLimit(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="actions" style={{ marginTop: 4 }}>
-              <button type="button" className="pill pill-primary" style={{ padding: "0 22px" }} disabled={creating} onClick={() => void createLink()}>
-                Create link
-              </button>
-            </div>
-            {linkError && <p className="error-text">{linkError}</p>}
-          </section>
+              {linkError && <p className="error-text">{linkError}</p>}
+            </section>
+          )}
         </div>
         <section className="share-right" aria-label="Active shares">
           <h3>Active shares</h3>

@@ -65,7 +65,7 @@ function Sidebar({ open, onClose, onUpload }: { open: boolean; onClose: () => vo
     for (const i of items) if (!i.trashedAt) for (const t of i.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }, [items]);
-  const sharedCount = items.filter((i) => i.incoming).length;
+  const sharedCount = items.filter((i) => i.incoming && !i.parentId).length;
 
   const link = (href: string, label: React.ReactNode, count?: number) => (
     <Link href={href} aria-current={pathname === href ? "page" : undefined} onClick={onClose}>

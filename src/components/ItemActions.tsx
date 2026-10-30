@@ -7,6 +7,7 @@ import { ConfirmDialog, Dialog, NameDialog } from "./Dialog";
 import { ShareDialog } from "./ShareDialog";
 import { downloadNode, saveBlob } from "@/lib/files";
 import { api } from "@/lib/api";
+import { wrapKey } from "@/lib/crypto";
 
 type Open = { kind: "rename" | "move" | "share" | "delete"; item: Item } | null;
 
@@ -51,12 +52,12 @@ export function useItemActions() {
             Download
           </button>
         )}
-        {item.kind === "file" && owner && (
+        {owner && (
           <button type="button" role="menuitem" onClick={run(() => setOpen({ kind: "share", item }))}>
             Share
           </button>
         )}
-        {(item.kind === "file" || owner) && <hr />}
+        {canEdit && <hr />}
         {canEdit && (
           <button type="button" role="menuitem" onClick={run(() => setOpen({ kind: "rename", item }))}>
             Rename
@@ -132,7 +133,12 @@ function MoveDialog({ item, onClose }: { item: Item; onClose: () => void }) {
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
-          await api(`/nodes/${item.id}`, { method: "PATCH", body: { parentId: target || null } });
+          // Re-wrap the key for the new folder, so whoever that folder is shared with can open it.
+          const parent = target ? items.find((i) => i.id === target) : undefined;
+          await api(`/nodes/${item.id}`, {
+            method: "PATCH",
+            body: { parentId: target || null, parentKey: parent ? await wrapKey(parent.key, item.key) : undefined },
+          });
           await refresh();
           onClose();
         }}

@@ -107,7 +107,8 @@ export function FileBrowser({ scope }: { scope: Scope }) {
           out = items.filter((i) => i.parentId === scope.id && !i.trashedAt);
           break;
         case "shared":
-          out = items.filter((i) => i.incoming);
+          // What was shared with you; the contents of shared folders stay inside them.
+          out = items.filter((i) => i.incoming && !i.parentId);
           break;
         case "trash":
           out = items.filter((i) => topTrashed(byId, i));
@@ -217,7 +218,7 @@ export function FileBrowser({ scope }: { scope: Scope }) {
               <div>
                 {crumbs.length > 0 || folder ? (
                   <nav className="crumbs" aria-label="Folder path">
-                    <Link href="/">All files</Link>
+                    {folder?.incoming ? <Link href="/shared">Shared with me</Link> : <Link href="/">All files</Link>}
                     {crumbs.map((c) => (
                       <span key={c.id} style={{ display: "contents" }}>
                         <span aria-hidden="true">/</span>
@@ -233,7 +234,7 @@ export function FileBrowser({ scope }: { scope: Scope }) {
                   <Lock />
                   Encrypted
                 </span>
-                {scope.kind === "folder" && (
+                {scope.kind === "folder" && !folder?.incoming && (
                   <button type="button" className="pill pill-outline pill-md d-only" onClick={() => setNewFolder(true)}>
                     New folder
                   </button>
