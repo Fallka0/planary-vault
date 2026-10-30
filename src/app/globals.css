@@ -335,6 +335,10 @@ a.chip:hover, button.chip:hover { background: #26262d; }
 .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .storage { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
 .storage-line { display: flex; justify-content: space-between; font-size: 13px; }
+.storage-plan { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; }
+.storage-plan a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--faint); }
+.storage-plan a:hover { color: var(--text); text-decoration-color: var(--text); }
+a.storage { color: inherit; text-decoration: none; }
 .storage-bar { height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; }
 .storage-bar > div { height: 100%; background: var(--text); }
 

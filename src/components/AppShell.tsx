@@ -32,22 +32,33 @@ function StorageMeter({ compact }: { compact?: boolean }) {
   const { used, plan } = useVault();
   const pct = Math.min(100, (used / plan.quota) * 100);
   const warn = pct >= 95 ? "Almost full" : pct >= 80 ? "Running out of space" : null;
-  return (
-    <div className="storage">
-      {compact ? (
+  if (compact) {
+    // On phones the meter in the dock is the way to the plans.
+    return (
+      <Link href="/plans" className="storage" aria-label={`${plan.name}: ${formatProgress(used, plan.quota)}. See plans`}>
         <div className="storage-line">
           <span className="hint">{formatProgress(used, plan.quota)}</span>
         </div>
-      ) : (
-        <div className="storage-line">
-          <span style={{ fontWeight: 600 }}>{used ? formatBytes(used) : "0 GB"}</span>
-          <span className="hint">of {formatBytes(plan.quota)}</span>
+        <div className="storage-bar">
+          <div className="fill-once" style={{ width: `${Math.max(pct, used > 0 ? 1 : 0)}%` }} />
         </div>
-      )}
+      </Link>
+    );
+  }
+  return (
+    <div className="storage">
+      <div className="storage-plan">
+        <span>{plan.name}</span>
+        <Link href="/plans">{plan.id === "free" ? "Upgrade" : "Change plan"}</Link>
+      </div>
+      <div className="storage-line">
+        <span style={{ fontWeight: 600 }}>{used ? formatBytes(used) : "0 GB"}</span>
+        <span className="hint">of {formatBytes(plan.quota)}</span>
+      </div>
       <div className="storage-bar" role="img" aria-label={`${Math.round(pct)}% of storage used`}>
         <div className="fill-once" style={{ width: `${Math.max(pct, used > 0 ? 1 : 0)}%` }} />
       </div>
-      {warn && !compact && used <= plan.quota && (
+      {warn && used <= plan.quota && (
         <span className="storage-warn">
           {warn} · <Link href="/plans">See plans</Link>
         </span>
@@ -127,6 +138,7 @@ function Sidebar({ open, onClose, onUpload }: { open: boolean; onClose: () => vo
         {link("/recent", "Recent")}
         {link("/shared", <span style={{ flex: 1 }}>Shared with me</span>, sharedCount)}
         {link("/trash", "Trash")}
+        {link("/plans", "Plans")}
         <Link href="/settings" className="m-only" onClick={onClose}>
           Settings
         </Link>
@@ -265,7 +277,7 @@ function useDropZone(onFiles: (files: File[]) => void) {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { user, lock, enqueue, currentFolder } = useVault();
+  const { user, plan, lock, enqueue, currentFolder } = useVault();
   const router = useRouter();
   const picker = useUploadPicker();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -290,6 +302,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="topbar">
           <SearchBox />
           <div className="topbar-right">
+            {plan.id === "free" && (
+              <Link href="/plans" className="pill pill-outline pill-sm">
+                Upgrade
+              </Link>
+            )}
             <span className="encrypted">
               <Lock />
               Encrypted
