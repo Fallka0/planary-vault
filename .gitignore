@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.wrangler/
+.vercel/
+next-env.d.ts
+*.tsbuildinfo
+.env*
+.dev.vars
+# Copied from pdfjs-dist by scripts/copy-pdf-worker.mjs before dev and build.
+public/pdf.worker.min.mjs

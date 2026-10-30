@@ -4,7 +4,7 @@
   "main": "api/worker.ts",
   "compatibility_date": "2025-09-01",
   "d1_databases": [
-    { "binding": "DB", "database_name": "planary-vault", "database_id": "REPLACE_WITH_D1_ID", "migrations_dir": "api/migrations" }
+    { "binding": "DB", "database_name": "planary-vault", "database_id": "b9f52f54-2658-42ae-9297-5f262479769f", "migrations_dir": "api/migrations" }
   ],
   "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "planary-vault-blobs" }],
   "vars": {
