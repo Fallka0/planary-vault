@@ -356,10 +356,8 @@ a.chip:hover, button.chip:hover { background: #26262d; }
 
 .menu-wrap { position: relative; }
 .menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 30;
+  position: fixed;
+  z-index: 75;
   min-width: 200px;
   padding: 6px;
   background: var(--surface);
