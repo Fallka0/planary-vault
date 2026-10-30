@@ -46,11 +46,13 @@ export default function Plans() {
   useEffect(() => {
     let active = true;
     // Back from checkout: the plan may have changed a moment ago.
-    const back = params.get("checkout") === "done";
-    void (back ? reloadPlan() : Promise.resolve()).then(async () => {
+    const how = params.get("checkout");
+    void (how === "done" ? reloadPlan() : Promise.resolve()).then(async () => {
       if (!active) return;
       await load();
-      if (back) setNote("Thanks. Your plan is updated.");
+      if (how === "done") setNote("Thanks. Your plan is updated.");
+      else if (how === "cancelled") setNote("Checkout cancelled. Nothing was charged.");
+      else if (how === "failed") setError("The payment didn't go through. Nothing was charged.");
     });
     return () => {
       active = false;
