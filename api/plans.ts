@@ -105,8 +105,9 @@ export async function orgCall<T>(env: Env, request: Request, path: string, body?
   }
   if (!res.ok) {
     const { error, code } = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-    if (code === "billing_not_configured" || res.status >= 500) throw new BillingError(503, "Plans can't be bought yet.");
-    throw new BillingError(res.status, error || `Billing said no (${res.status})`);
+    if (code === "billing_not_configured") throw new BillingError(503, "Plans can't be bought yet.");
+    // Anything else says what went wrong (planary-org logs the provider's reason).
+    throw new BillingError(res.status >= 500 ? 503 : res.status, error || `Billing said no (${res.status})`);
   }
   return (await res.json()) as T;
 }
