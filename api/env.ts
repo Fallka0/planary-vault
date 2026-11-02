@@ -9,7 +9,10 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   /** planary-org, which bills Vault (default https://org.planary.ch). */
   ORG_API_URL?: string;
-  /** Shared secret for planary-org's /internal routes. Without it the cached plan is used as it is. */
+  /**
+   * Shared secret for planary-org's /internal routes (without it the cached plan is used as it is),
+   * and for this worker's own /internal routes, called by planary-auth and planary-org.
+   */
   INTERNAL_KEY?: string;
   /** Where people come back to after paying (default https://vault.planary.ch). */
   APP_URL?: string;

@@ -326,6 +326,78 @@ async function deleteNodeTree(env: Env, nodeId: string) {
   ]);
 }
 
+/**
+ * A person's whole vault: every file and folder they own with all versions and
+ * their objects, uploads still in progress, and what others shared with them.
+ */
+async function deleteVaultOf(env: Env, userId: string) {
+  const roots = await env.DB.prepare("SELECT id FROM nodes WHERE owner_id = ?").bind(userId).all<{ id: string }>();
+  for (const n of roots.results) {
+    // A parent may already have taken this node with it.
+    const still = await env.DB.prepare("SELECT 1 FROM nodes WHERE id = ?").bind(n.id).first();
+    if (still) await deleteNodeTree(env, n.id);
+  }
+  const uploads = await env.DB.prepare("SELECT blob_key, r2_upload_id FROM uploads WHERE user_id = ?")
+    .bind(userId)
+    .all<{ blob_key: string; r2_upload_id: string }>();
+  for (const u of uploads.results) {
+    await env.BLOBS.resumeMultipartUpload(u.blob_key, u.r2_upload_id)
+      .abort()
+      .catch(() => undefined);
+  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM shares WHERE recipient_id = ? OR owner_id = ?").bind(userId, userId),
+    env.DB.prepare("DELETE FROM links WHERE owner_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM uploads WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM vaults WHERE user_id = ?").bind(userId),
+  ]);
+}
+
+function sameSecret(given: string, expected: string): boolean {
+  if (!given || !expected || given.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < given.length; i++) diff |= given.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
+
+/** Storage per person, largest first, for the Planary Console. Sizes are ciphertext bytes, as the quota counts them. */
+async function usageReport(env: Env) {
+  const rows = await env.DB.prepare(
+    `WITH objects AS (SELECT DISTINCT n.owner_id, v.blob_key, v.size FROM versions v JOIN nodes n ON n.id = v.node_id),
+          used AS (SELECT owner_id, SUM(size) AS used FROM objects GROUP BY owner_id),
+          files AS (SELECT owner_id, COUNT(*) AS files FROM nodes WHERE kind = 'file' GROUP BY owner_id),
+          seen AS (SELECT user_id, MAX(last_seen) AS last_seen FROM devices GROUP BY user_id)
+     SELECT x.user_id, x.name, x.email, x.plan, x.created_at, COALESCE(u.used, 0) AS used, COALESCE(f.files, 0) AS files, s.last_seen
+     FROM vaults x
+       LEFT JOIN used u ON u.owner_id = x.user_id
+       LEFT JOIN files f ON f.owner_id = x.user_id
+       LEFT JOIN seen s ON s.user_id = x.user_id
+     ORDER BY used DESC, x.created_at`,
+  ).all<{ user_id: string; name: string; email: string; plan: string; created_at: number; used: number; files: number; last_seen: number | null }>();
+  const people = rows.results.map((r) => {
+    const plan = planOf(r.plan);
+    return {
+      userId: r.user_id,
+      name: r.name,
+      email: r.email,
+      plan: plan.id,
+      used: r.used,
+      quota: plan.quota,
+      files: r.files,
+      createdAt: r.created_at,
+      lastSeen: r.last_seen,
+    };
+  });
+  return {
+    people,
+    totals: {
+      vaults: people.length,
+      used: people.reduce((sum, p) => sum + p.used, 0),
+      quota: people.reduce((sum, p) => sum + p.quota, 0),
+    },
+  };
+}
+
 function serializeNode(n: NodeRow & { size?: number | null; total?: number | null }) {
   return {
     id: n.id,
@@ -485,6 +557,27 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     });
   }
 
+  // Worker-to-worker, with the shared INTERNAL_KEY: planary-auth deletes a
+  // banned account's vault, planary-org reads storage per person for the Console.
+  if (parts[0] === "internal") {
+    if (!sameSecret(request.headers.get("x-internal-key") ?? "", env.INTERNAL_KEY ?? "")) throw new HttpError(403, "forbidden");
+    if (at("internal", "usage") && method === "GET") return json(await usageReport(env));
+    // Everything of the person goes, including their name on other people's
+    // activity and their devices. Repeating it is harmless.
+    if (at("internal", "users", ":id") && method === "DELETE") {
+      const userId = parts[2];
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(userId)) throw new HttpError(400, "invalid user id");
+      await deleteVaultOf(env, userId);
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM activity WHERE actor_id = ?").bind(userId),
+        env.DB.prepare("DELETE FROM devices WHERE user_id = ?").bind(userId),
+      ]);
+      for (const [token, hit] of VERIFIED) if (hit.user.id === userId) VERIFIED.delete(token);
+      return json({ ok: true });
+    }
+    throw new HttpError(404, "no such route");
+  }
+
   // Everything below needs a Planary account.
   const user = await identify(request, env);
   if (!user) throw new HttpError(401, "not authenticated");
@@ -596,17 +689,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
   if (at("vault") && method === "DELETE") {
     await requireVault(env, user);
-    const roots = await env.DB.prepare("SELECT id FROM nodes WHERE owner_id = ?").bind(user.id).all<{ id: string }>();
-    for (const n of roots.results) {
-      // A parent may already have taken this node with it.
-      const still = await env.DB.prepare("SELECT 1 FROM nodes WHERE id = ?").bind(n.id).first();
-      if (still) await deleteNodeTree(env, n.id);
-    }
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM shares WHERE recipient_id = ?").bind(user.id),
-      env.DB.prepare("DELETE FROM uploads WHERE user_id = ?").bind(user.id),
-      env.DB.prepare("DELETE FROM vaults WHERE user_id = ?").bind(user.id),
-    ]);
+    await deleteVaultOf(env, user.id);
     return json({ ok: true });
   }
 
