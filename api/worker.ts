@@ -261,7 +261,34 @@ async function vaultOf(env: Env, userId: string) {
     wrapped_private_key: string;
     auto_lock_minutes: number;
     created_at: number;
-  }>();
+  } & Restrictions>();
+}
+
+interface Restrictions {
+  no_uploads: number;
+  no_sharing: number;
+  quota_override: number | null;
+  restrict_reason: string | null;
+  restricted_at: number | null;
+}
+
+/** The storage limit that holds: staff's override, else the plan's. */
+const quotaOf = (v: { plan: string } & Pick<Restrictions, "quota_override">) => v.quota_override ?? planOf(v.plan).quota;
+
+/** What the person (and the Console) sees of the restrictions. */
+function restrictionsOf(v: Restrictions) {
+  return {
+    uploads: !v.no_uploads,
+    sharing: !v.no_sharing,
+    quota: v.quota_override,
+    reason: v.restrict_reason,
+    since: v.restricted_at,
+  };
+}
+
+/** Refuses with the reason staff gave, so the app can show it as it is. */
+function restricted(v: Restrictions, what: string): never {
+  throw new HttpError(403, `${what} turned off for your vault by Planary.${v.restrict_reason ? ` Reason: ${v.restrict_reason}` : ""} Questions? Write to info@planary.ch.`);
 }
 
 async function requireVault(env: Env, user: User) {
@@ -367,13 +394,14 @@ async function usageReport(env: Env) {
           used AS (SELECT owner_id, SUM(size) AS used FROM objects GROUP BY owner_id),
           files AS (SELECT owner_id, COUNT(*) AS files FROM nodes WHERE kind = 'file' GROUP BY owner_id),
           seen AS (SELECT user_id, MAX(last_seen) AS last_seen FROM devices GROUP BY user_id)
-     SELECT x.user_id, x.name, x.email, x.plan, x.created_at, COALESCE(u.used, 0) AS used, COALESCE(f.files, 0) AS files, s.last_seen
+     SELECT x.user_id, x.name, x.email, x.plan, x.created_at, COALESCE(u.used, 0) AS used, COALESCE(f.files, 0) AS files, s.last_seen,
+       x.no_uploads, x.no_sharing, x.quota_override, x.restrict_reason, x.restricted_at
      FROM vaults x
        LEFT JOIN used u ON u.owner_id = x.user_id
        LEFT JOIN files f ON f.owner_id = x.user_id
        LEFT JOIN seen s ON s.user_id = x.user_id
      ORDER BY used DESC, x.created_at`,
-  ).all<{ user_id: string; name: string; email: string; plan: string; created_at: number; used: number; files: number; last_seen: number | null }>();
+  ).all<{ user_id: string; name: string; email: string; plan: string; created_at: number; used: number; files: number; last_seen: number | null } & Restrictions>();
   const people = rows.results.map((r) => {
     const plan = planOf(r.plan);
     return {
@@ -382,10 +410,11 @@ async function usageReport(env: Env) {
       email: r.email,
       plan: plan.id,
       used: r.used,
-      quota: plan.quota,
+      quota: quotaOf(r),
       files: r.files,
       createdAt: r.created_at,
       lastSeen: r.last_seen,
+      restrictions: restrictionsOf(r),
     };
   });
   return {
@@ -475,7 +504,7 @@ async function listNodes(env: Env, user: User) {
       ownerName: row.owner_name,
       sharedWith: [],
     })),
-    usage: { used: await usage(env, user.id), plan: plan.id },
+    usage: { used: await usage(env, user.id), plan: plan.id, quota: quotaOf(vault), restrictions: restrictionsOf(vault) },
   };
 }
 
@@ -562,6 +591,30 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (parts[0] === "internal") {
     if (!sameSecret(request.headers.get("x-internal-key") ?? "", env.INTERNAL_KEY ?? "")) throw new HttpError(403, "forbidden");
     if (at("internal", "usage") && method === "GET") return json(await usageReport(env));
+    // One person's vault for the Console's person page: storage and restrictions, never file names.
+    if (at("internal", "users", ":id") && method === "GET") {
+      const report = await usageReport(env);
+      return json({ vault: report.people.find((p) => p.userId === parts[2]) ?? null });
+    }
+    // Staff turn uploads or sharing off, or set a storage limit (null puts the plan's back).
+    if (at("internal", "users", ":id", "restrictions") && method === "POST") {
+      const v = await vaultOf(env, parts[2]);
+      if (!v) throw new HttpError(404, "no vault");
+      const b = await body(request);
+      const quota = b.quota === null || b.quota === undefined ? null : Number(b.quota);
+      if (quota !== null && (!Number.isSafeInteger(quota) || quota < 0)) throw new HttpError(400, "invalid quota");
+      const noUploads = b.uploads === false ? 1 : 0;
+      const noSharing = b.sharing === false ? 1 : 0;
+      const any = noUploads || noSharing || quota !== null;
+      const reason = typeof b.reason === "string" ? b.reason.trim().slice(0, 300) : "";
+      await env.DB.prepare(
+        "UPDATE vaults SET no_uploads = ?, no_sharing = ?, quota_override = ?, restrict_reason = ?, restricted_at = ? WHERE user_id = ?",
+      )
+        .bind(noUploads, noSharing, quota, any ? reason || null : null, any ? (v.restricted_at ?? Date.now()) : null, v.user_id)
+        .run();
+      const report = await usageReport(env);
+      return json({ vault: report.people.find((p) => p.userId === v.user_id) ?? null });
+    }
     // Everything of the person goes, including their name on other people's
     // activity and their devices. Repeating it is harmless.
     if (at("internal", "users", ":id") && method === "DELETE") {
@@ -607,6 +660,8 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
         planUntil: vault.plan_until,
         retentionUntil: vault.retention_until && vault.retention_until > Date.now() ? vault.retention_until : null,
         createdAt: vault.created_at,
+        quota: quotaOf(vault),
+        restrictions: restrictionsOf(vault),
       },
     });
   }
@@ -785,8 +840,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (!Number.isFinite(plain) || plain < 0) throw new HttpError(400, "invalid size");
     const size = cipherSize(plain);
     const plan = planOf(vault.plan);
+    if (vault.no_uploads) restricted(vault, "Uploads are");
     if (size > plan.maxFile + TAG_SIZE * Math.ceil(plan.maxFile / CHUNK_SIZE)) throw new HttpError(413, "file too large for your plan");
-    if ((await usage(env, user.id)) + size > plan.quota) throw new HttpError(413, "vault is full");
+    if ((await usage(env, user.id)) + size > quotaOf(vault)) throw new HttpError(413, "vault is full");
 
     const existing = optionalId(b.nodeId, "nodeId");
     let nodeId: string;
@@ -1047,6 +1103,8 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const a = await access(env, user, parts[1]);
     requireOwner(a);
     const b = await body(request);
+    const mine = await requireVault(env, user);
+    if (mine.no_sharing) restricted(mine, "Sharing is");
     const recipient = await vaultOf(env, String(b.recipientId ?? ""));
     if (!recipient || recipient.user_id === user.id) throw new HttpError(404, "no such person");
     const role = b.role === "edit" ? "edit" : "view";
@@ -1076,7 +1134,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const a = await access(env, user, parts[1]);
     requireOwner(a);
     if (a.node.kind !== "file") throw new HttpError(400, "only files can be shared");
-    const plan = planOf((await requireVault(env, user)).plan);
+    const mine = await requireVault(env, user);
+    if (mine.no_sharing) restricted(mine, "Sharing is");
+    const plan = planOf(mine.plan);
     const b = await body<{ password?: string; expiresAt?: number | null; downloadLimit?: number | null }>(request);
 
     let expiresAt = b.expiresAt ? Number(b.expiresAt) : null;

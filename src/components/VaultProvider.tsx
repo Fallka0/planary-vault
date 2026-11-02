@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { api, type NodeRecord, type NodesResponse, type VaultRecord, type VaultUser } from "@/lib/api";
+import { api, type NodeRecord, type NodesResponse, type Restrictions, type VaultRecord, type VaultUser } from "@/lib/api";
 import {
   fromB64,
   importPrivateKey,
@@ -74,6 +74,8 @@ interface VaultState {
   used: number;
   autoLockMinutes: number;
   planSource: VaultRecord["planSource"];
+  /** Set by Planary staff: uploads or sharing off, or a storage limit of their own. */
+  restrictions: Restrictions | null;
   planUntil: number | null;
   retentionUntil: number | null;
   /** Asks again right away, e.g. after coming back from checkout. */
@@ -128,6 +130,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<Item[]>([]);
   const [used, setUsed] = useState(0);
   const [planId, setPlanId] = useState("free");
+  const [quota, setQuota] = useState<number | null>(null);
+  const [restrictions, setRestrictions] = useState<Restrictions | null>(null);
   const [curtain, setCurtain] = useState<"cover" | "lift" | "hold" | null>("hold");
   const [setupPassphrase, setSetupPassphrase] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
@@ -153,6 +157,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         } else {
           setRecord(res.vault);
           setPlanId(res.vault.plan);
+          setQuota(res.vault.quota ?? null);
+          setRestrictions(res.vault.restrictions ?? null);
           setStatus("locked");
         }
       })
@@ -244,6 +250,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     setItems([...own, ...shared.values()]);
     setUsed(res.usage.used);
     setPlanId(res.usage.plan);
+    setQuota(res.usage.quota ?? null);
+    setRestrictions(res.usage.restrictions ?? null);
   }, []);
 
   const openVault = useCallback(
@@ -363,6 +371,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const fresh = res.vault;
     setRecord((r) => (r ? { ...r, plan: fresh.plan, planSource: fresh.planSource, planUntil: fresh.planUntil, retentionUntil: fresh.retentionUntil } : r));
     setPlanId(fresh.plan);
+    setQuota(fresh.quota ?? null);
+    setRestrictions(fresh.restrictions ?? null);
   }, []);
 
   // ── Auto-lock after idle
@@ -479,6 +489,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           // Plan limits get a way to more room instead of a retry.
           if (message === "vault is full") patchUpload(next.id, { state: "failed", error: "Your vault is full", limit: true });
           else if (message === "file too large for your plan") patchUpload(next.id, { state: "failed", error: "Too large for your plan", limit: true });
+          else if (message.includes("turned off for your vault")) patchUpload(next.id, { state: "failed", error: "Uploads are turned off" });
           else patchUpload(next.id, { state: "failed", error: "Upload failed" });
         } finally {
           controllers.current.delete(next.id);
@@ -522,7 +533,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const value: VaultState = {
     status,
     user,
-    plan: planOf(planId),
+    // Staff can give a vault its own limit; everything else stays the plan's.
+    plan: quota === null ? planOf(planId) : { ...planOf(planId), quota },
+    restrictions,
     used,
     autoLockMinutes,
     planSource: record?.planSource ?? "default",

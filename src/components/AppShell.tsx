@@ -84,6 +84,24 @@ function OverQuota() {
   );
 }
 
+/** Planary staff turned uploads or sharing off: say what and why, once, above everything. */
+function Restricted() {
+  const { restrictions } = useVault();
+  if (!restrictions || (restrictions.uploads && restrictions.sharing)) return null;
+  const off = [!restrictions.uploads && "uploads", !restrictions.sharing && "sharing"].filter(Boolean).join(" and ");
+  return (
+    <div className="banner" role="status">
+      <span>
+        <b>Planary turned {off} off for your vault.</b> {restrictions.reason ? `Reason: ${restrictions.reason} ` : ""}Your files stay readable and
+        downloadable.
+      </span>
+      <a href="mailto:info@planary.ch" className="pill pill-outline pill-md">
+        Write to support
+      </a>
+    </div>
+  );
+}
+
 function Sidebar({ open, onClose, onUpload }: { open: boolean; onClose: () => void; onUpload: () => void }) {
   const { items, createFolder, lock } = useVault();
   const pathname = usePathname();
@@ -319,6 +337,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </div>
+        <Restricted />
         <OverQuota />
         {children}
       </section>
