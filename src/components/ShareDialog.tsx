@@ -41,7 +41,7 @@ function CopyLink({ item, id }: { item: Item; id: string }) {
 }
 
 export function ShareDialog({ item, onClose }: { item: Item; onClose: () => void }) {
-  const { plan, refresh } = useVault();
+  const { plan, refresh, restrictions } = useVault();
   const [people, setPeople] = useState<ShareRecord[]>([]);
   const [links, setLinks] = useState<LinkRecord[]>([]);
   const [who, setWho] = useState("");
@@ -92,7 +92,13 @@ export function ShareDialog({ item, onClose }: { item: Item; onClose: () => void
       setWho("");
       await Promise.all([load(), refresh()]);
     } catch (error) {
-      setInviteError(error instanceof ApiError && error.status === 404 ? "No vault for that email yet." : "Couldn't share. Try again.");
+      setInviteError(
+        error instanceof ApiError && error.status === 404
+          ? "No vault for that email yet."
+          : error instanceof ApiError && error.status === 403
+            ? error.message
+            : "Couldn't share. Try again.",
+      );
     } finally {
       setInviting(false);
     }
@@ -111,8 +117,8 @@ export function ShareDialog({ item, onClose }: { item: Item; onClose: () => void
       await load();
       // The fresh link goes straight to the clipboard; it can be copied again from the list.
       await navigator.clipboard.writeText(await linkUrl(item, res.id)).catch(() => undefined);
-    } catch {
-      setLinkError("Couldn't create the link. Try again.");
+    } catch (error) {
+      setLinkError(error instanceof ApiError && error.status === 403 ? error.message : "Couldn't create the link. Try again.");
     } finally {
       setCreating(false);
     }
@@ -123,6 +129,11 @@ export function ShareDialog({ item, onClose }: { item: Item; onClose: () => void
 
   return (
     <Dialog title={folder ? "Share folder" : "Share file"} onClose={onClose}>
+      {restrictions && !restrictions.sharing && (
+        <p className="error-text" role="status" style={{ marginBottom: 16 }}>
+          Planary turned sharing off for your vault{restrictions.reason ? `: ${restrictions.reason}` : "."} Existing links and shares still work until you remove them.
+        </p>
+      )}
       <div className="share-cols">
         <div className="share-left">
           <section>

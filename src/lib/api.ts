@@ -92,6 +92,18 @@ export interface VaultRecord {
   /** After a downgrade: older versions are kept by the old plan's rules until then. */
   retentionUntil: number | null;
   createdAt: number;
+  /** The storage limit that holds (staff can set one in place of the plan's). Missing from older API versions. */
+  quota?: number;
+  restrictions?: Restrictions;
+}
+
+/** What Planary staff have turned off for this vault, and why. */
+export interface Restrictions {
+  uploads: boolean;
+  sharing: boolean;
+  quota: number | null;
+  reason: string | null;
+  since: number | null;
 }
 
 /** The Vault subscription as planary-org bills it; null without one. */
@@ -134,7 +146,7 @@ export interface NodeRecord {
 export interface NodesResponse {
   nodes: NodeRecord[];
   shared: NodeRecord[];
-  usage: { used: number; plan: string };
+  usage: { used: number; plan: string; quota?: number; restrictions?: Restrictions };
 }
 
 export interface VersionRecord {
