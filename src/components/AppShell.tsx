@@ -7,6 +7,7 @@ import { countFiles, useVault } from "./VaultProvider";
 import { Lockup } from "./Logo";
 import { Close, Folder, Lock, Menu as MenuIcon, Plus, Search } from "./Icons";
 import { UploadQueue } from "./UploadQueue";
+import { useDragMove } from "./useDragMove";
 import { formatBytes, formatProgress, initials } from "@/lib/format";
 
 export function useUploadPicker() {
@@ -119,8 +120,9 @@ function Sidebar({ open, onClose, onUpload }: { open: boolean; onClose: () => vo
   }, [items]);
   const sharedCount = items.filter((i) => i.incoming && !i.parentId).length;
 
+  const { dropProps } = useDragMove();
   const link = (href: string, label: React.ReactNode, count?: number) => (
-    <Link href={href} aria-current={pathname === href ? "page" : undefined} onClick={onClose}>
+    <Link href={href} aria-current={pathname === href ? "page" : undefined} onClick={onClose} {...(href === "/" ? dropProps(null) : {})}>
       {label}
       {count ? <span className="count">{count}</span> : null}
     </Link>
@@ -169,7 +171,7 @@ function Sidebar({ open, onClose, onUpload }: { open: boolean; onClose: () => vo
           </button>
         </div>
         {folders.map((f) => (
-          <Link key={f.id} href={`/folder/${f.id}`} aria-current={pathname === `/folder/${f.id}` ? "page" : undefined} onClick={onClose}>
+          <Link key={f.id} href={`/folder/${f.id}`} aria-current={pathname === `/folder/${f.id}` ? "page" : undefined} onClick={onClose} {...dropProps(f.id)}>
             <Folder />
             <span>{f.name}</span>
             <span className="count">{countFiles(items, f.id)}</span>
