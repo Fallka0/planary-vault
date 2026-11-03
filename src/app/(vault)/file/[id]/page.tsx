@@ -13,7 +13,7 @@ import { ArrowUpRight, ChevronLeft, Close, Download, Lock, More } from "@/compon
 import { api, type ActivityRecord, type ShareRecord, type VersionRecord } from "@/lib/api";
 import { downloadNode, saveBlob, type FileMeta } from "@/lib/files";
 import { sealJson } from "@/lib/crypto";
-import { formatBytes, formatDay, formatLongDate, formatStamp, initials, typeLabel } from "@/lib/format";
+import { formatBytes, formatDay, formatLongDate, formatStamp, initials, shownName, typeLabel } from "@/lib/format";
 import { CHUNK_SIZE, TAG_SIZE } from "../../../../../shared/plans";
 
 type Tab = "details" | "versions" | "activity";
@@ -74,7 +74,7 @@ function FileView({ item }: { item: Item }) {
         <Link href={back} className="icon-btn" aria-label={`Back to ${folder?.name ?? (item.incoming ? "Shared with me" : "All files")}`}>
           <ChevronLeft />
         </Link>
-        <h1 title={item.name}>{item.name}</h1>
+        <h1 title={item.name}>{shownName(item.name, item.mime)}</h1>
         <div className="detail-actions">
           <button type="button" className="pill pill-outline" disabled={!decrypted} onClick={download}>
             {decrypted && <Download />}

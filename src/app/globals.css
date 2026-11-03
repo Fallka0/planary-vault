@@ -736,3 +736,34 @@ a.storage { color: inherit; text-decoration: none; }
 .note-text { flex: 1; min-height: 320px; width: 100%; resize: none; border: 0; outline: none; background: transparent; color: var(--text); padding: 32px clamp(20px, 4vw, 48px); font: inherit; font-size: 16px; line-height: 1.7; }
 .note-text::placeholder { color: var(--muted); }
 .note .preview-bar .error-text { color: var(--danger); }
+
+/* formatted notes: toolbar and page */
+.note-rich-wrap { flex: 1; min-height: 360px; display: flex; flex-direction: column; }
+.note-tb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.tb-btn { min-width: 32px; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); display: inline-grid; place-items: center; font-size: 15px; cursor: pointer; transition: background var(--t-hover), color var(--t-hover); }
+.tb-btn:hover:not(:disabled) { background: var(--chip); color: var(--text); }
+.tb-btn.is-on { background: var(--text); color: var(--bg); }
+.tb-btn:disabled { opacity: .35; cursor: default; }
+.tb-btn:focus-visible, .tb-sel:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.tb-sel { height: 32px; border: 0; border-radius: 8px; background: var(--chip); color: var(--text); padding: 0 8px; font: inherit; font-size: 13px; cursor: pointer; max-width: 120px; }
+.tb-size { width: 70px; }
+.tb-sep { width: 1px; height: 20px; background: var(--line-soft); margin: 0 6px; }
+.note-rich-scroll { flex: 1; min-height: 0; overflow: auto; }
+.note-rich { min-height: 100%; outline: none; padding: 32px clamp(20px, 4vw, 48px) 48px; font-size: 16px; line-height: 1.7; color: var(--text); }
+.note-rich > * + * { margin-top: .6em; }
+.note-rich h1 { font-family: var(--font-display); font-weight: 300; font-size: 34px; line-height: 1.15; letter-spacing: -.04em; }
+.note-rich h2 { font-family: var(--font-display); font-weight: 400; font-size: 24px; line-height: 1.2; letter-spacing: -.03em; }
+.note-rich h3 { font-size: 18px; font-weight: 700; }
+.note-rich ul, .note-rich ol { padding-left: 1.4em; }
+.note-rich ul { list-style: disc; }
+.note-rich ol { list-style: decimal; }
+.note-rich li > p { margin: 0; }
+.note-rich ul[data-type="taskList"] { list-style: none; padding-left: 2px; }
+.note-rich ul[data-type="taskList"] li { display: flex; gap: 10px; align-items: flex-start; }
+.note-rich ul[data-type="taskList"] li > label { margin-top: .3em; }
+.note-rich ul[data-type="taskList"] li > label input { width: 16px; height: 16px; accent-color: var(--text); cursor: pointer; }
+.note-rich ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted); text-decoration: line-through; }
+.note-rich blockquote { border-left: 2px solid var(--line); padding-left: 16px; color: var(--muted); }
+.note-rich code { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: var(--chip); padding: 1px 5px; border-radius: 5px; }
+.note-rich p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--muted); float: left; height: 0; pointer-events: none; }
+@media (max-width: 720px) { .note-tb { overflow-x: auto; flex-wrap: nowrap; } }

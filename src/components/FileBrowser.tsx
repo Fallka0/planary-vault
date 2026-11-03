@@ -7,9 +7,10 @@ import { countFiles, useVault, type Item } from "./VaultProvider";
 import { useItemActions } from "./ItemActions";
 import { useUploadPicker } from "./AppShell";
 import { NameDialog } from "./Dialog";
+import { NOTE_MIME, notePage } from "./RichNote";
 import { Menu } from "./Menu";
 import { ChevronDown, Folder, GridIcon, ListIcon, Lock, More } from "./Icons";
-import { formatBytes, formatShortDate, initials, typeBadge } from "@/lib/format";
+import { formatBytes, formatShortDate, initials, shownName, typeBadge } from "@/lib/format";
 
 export type Scope =
   | { kind: "all" }
@@ -343,13 +344,13 @@ export function FileBrowser({ scope }: { scope: Scope }) {
                             <Folder />
                           </span>
                         ) : (
-                          <span className="badge">{typeBadge(i.name)}</span>
+                          <span className="badge">{typeBadge(i.name, i.mime)}</span>
                         )}
                         <span className="d-only" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {i.name}
+                          {shownName(i.name, i.mime)}
                         </span>
                         <span className="m-two m-only">
-                          <span>{i.name}</span>
+                          <span>{shownName(i.name, i.mime)}</span>
                           <span>{i.kind === "folder" ? meta(i) : `${formatShortDate(i.updatedAt)} · ${meta(i)}`}</span>
                         </span>
                       </Link>
@@ -386,11 +387,11 @@ export function FileBrowser({ scope }: { scope: Scope }) {
               <div className="grid fade-in" key="grid">
                 {list.map((i) => (
                   <div key={i.id} className="card">
-                    <div className="card-thumb">{i.kind === "folder" ? <Folder /> : typeBadge(i.name)}</div>
+                    <div className="card-thumb">{i.kind === "folder" ? <Folder /> : typeBadge(i.name, i.mime)}</div>
                     <div className="card-text">
                       <Link href={i.trashedAt ? "#" : href(i)} className="card-name" style={{ position: "static" }}>
                         <span style={{ position: "absolute", inset: 0, borderRadius: 20 }} aria-hidden="true" />
-                        {i.name}
+                        {shownName(i.name, i.mime)}
                       </Link>
                       <span className="card-meta">
                         {formatShortDate(i.updatedAt)} · {meta(i)}
@@ -425,9 +426,9 @@ export function FileBrowser({ scope }: { scope: Scope }) {
           label="Title"
           confirm="Create"
           onSubmit={async (title) => {
-            // A note is an encrypted text file; the extension makes it open anywhere once downloaded.
-            const name = /\.(txt|md)$/i.test(title) ? title : `${title}.txt`;
-            const id = await saveNote("", { name, parentId: scope.kind === "folder" ? scope.id : null });
+            // A note is an encrypted HTML page, so it keeps its formatting and opens in any browser once downloaded.
+            const name = /\.html?$/i.test(title) ? title : `${title}.html`;
+            const id = await saveNote(notePage(title.replace(/\.html?$/i, ""), ""), { name, parentId: scope.kind === "folder" ? scope.id : null }, NOTE_MIME);
             router.push(`/file/${id}`);
           }}
           onClose={() => setNewNote(false)}
