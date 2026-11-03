@@ -8,6 +8,7 @@ import { useItemActions } from "./ItemActions";
 import { useUploadPicker } from "./AppShell";
 import { NameDialog } from "./Dialog";
 import { NOTE_MIME, notePage } from "./RichNote";
+import { useDragMove } from "./useDragMove";
 import { Menu } from "./Menu";
 import { ChevronDown, Folder, GridIcon, ListIcon, Lock, More } from "./Icons";
 import { formatBytes, formatShortDate, initials, shownName, typeBadge } from "@/lib/format";
@@ -74,6 +75,9 @@ export function FileBrowser({ scope }: { scope: Scope }) {
   const [searchIn, setSearchIn] = useState<SearchIn>("all");
   const [newFolder, setNewFolder] = useState(false);
   const [newNote, setNewNote] = useState(false);
+  const { dragProps, dropProps } = useDragMove();
+  // Files and folders are picked up anywhere; folders also take what's dropped on them.
+  const dnd = (i: Item) => ({ ...dragProps(i), ...(i.kind === "folder" && !i.incoming && !i.trashedAt ? dropProps(i.id) : {}) });
 
   const folderId = scope.kind === "folder" ? scope.id : null;
   useEffect(() => {
@@ -223,11 +227,19 @@ export function FileBrowser({ scope }: { scope: Scope }) {
               <div>
                 {crumbs.length > 0 || folder ? (
                   <nav className="crumbs" aria-label="Folder path">
-                    {folder?.incoming ? <Link href="/shared">Shared with me</Link> : <Link href="/">All files</Link>}
+                    {folder?.incoming ? (
+                      <Link href="/shared">Shared with me</Link>
+                    ) : (
+                      <Link href="/" {...dropProps(null)}>
+                        All files
+                      </Link>
+                    )}
                     {crumbs.map((c) => (
                       <span key={c.id} style={{ display: "contents" }}>
                         <span aria-hidden="true">/</span>
-                        <Link href={`/folder/${c.id}`}>{c.name}</Link>
+                        <Link href={`/folder/${c.id}`} {...dropProps(c.id)}>
+                          {c.name}
+                        </Link>
                       </span>
                     ))}
                   </nav>
@@ -334,6 +346,7 @@ export function FileBrowser({ scope }: { scope: Scope }) {
                       key={i.id}
                       className={`list-row${i.trashedAt ? " is-dimmed" : ""}`}
                       role="row"
+                      {...dnd(i)}
                       onClick={(e) => {
                         if (!(e.target as HTMLElement).closest("a, button") && !i.trashedAt) router.push(href(i));
                       }}
@@ -386,7 +399,7 @@ export function FileBrowser({ scope }: { scope: Scope }) {
             ) : (
               <div className="grid fade-in" key="grid">
                 {list.map((i) => (
-                  <div key={i.id} className="card">
+                  <div key={i.id} className="card" {...dnd(i)}>
                     <div className="card-thumb">{i.kind === "folder" ? <Folder /> : typeBadge(i.name, i.mime)}</div>
                     <div className="card-text">
                       <Link href={i.trashedAt ? "#" : href(i)} className="card-name" style={{ position: "static" }}>

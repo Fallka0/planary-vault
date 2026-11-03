@@ -106,6 +106,9 @@ interface VaultState {
   uploads: UploadItem[];
   enqueue: (files: File[], parentId: string | null, existing?: Item) => void;
   /** Saves a note: a new one (returns its id) or a new version of `existing`. Encrypted like any file. */
+  /** Moves your own file or folder into one of your folders (null: All files). False when it can't go there. */
+  canMove: (item: Item, target: string | null) => boolean;
+  moveItem: (item: Item, target: string | null) => Promise<void>;
   saveNote: (text: string, to: { name: string; parentId: string | null } | { existing: Item }, mime?: string) => Promise<string>;
   retryUpload: (id: string) => void;
   clearUploads: () => void;
@@ -525,6 +528,30 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const retryUpload = useCallback((id: string) => patchUpload(id, { state: "waiting", done: 0, error: undefined }), [patchUpload]);
 
+  const canMove = useCallback((item: Item, target: string | null) => {
+    if (item.incoming || item.trashedAt || (item.parentId ?? null) === target) return false;
+    if (target === null) return true;
+    const folder = itemsRef.current.find((i) => i.id === target);
+    if (!folder || folder.kind !== "folder" || folder.incoming || folder.trashedAt) return false;
+    // A folder can't move into itself or anything inside it.
+    for (let at: string | null = target; at; at = itemsRef.current.find((i) => i.id === at)?.parentId ?? null) if (at === item.id) return false;
+    return true;
+  }, []);
+
+  const moveItem = useCallback(
+    async (item: Item, target: string | null) => {
+      if (!canMove(item, target)) return;
+      // Re-wrap the key for the new folder, so whoever that folder is shared with can open it.
+      const parent = target ? itemsRef.current.find((i) => i.id === target) : undefined;
+      await api(`/nodes/${item.id}`, {
+        method: "PATCH",
+        body: { parentId: target, parentKey: parent ? await wrapKey(parent.key, item.key) : undefined },
+      });
+      await refresh();
+    },
+    [canMove, refresh],
+  );
+
   const saveNote = useCallback(
     async (text: string, to: { name: string; parentId: string | null } | { existing: Item }, mime = "text/plain") => {
       if (!master.current) throw new Error("vault is locked");
@@ -585,6 +612,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     uploads,
     enqueue,
     saveNote,
+    canMove,
+    moveItem,
     retryUpload,
     clearUploads,
     currentFolder,

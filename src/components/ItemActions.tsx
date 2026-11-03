@@ -7,7 +7,6 @@ import { ConfirmDialog, Dialog, NameDialog } from "./Dialog";
 import { ShareDialog } from "./ShareDialog";
 import { downloadNode, saveBlob } from "@/lib/files";
 import { api } from "@/lib/api";
-import { wrapKey } from "@/lib/crypto";
 
 type Open = { kind: "rename" | "move" | "share" | "delete"; item: Item } | null;
 
@@ -108,7 +107,7 @@ export function useItemActions() {
 }
 
 function MoveDialog({ item, onClose }: { item: Item; onClose: () => void }) {
-  const { items, refresh } = useVault();
+  const { items, moveItem } = useVault();
   const [target, setTarget] = useState(item.parentId ?? "");
   const [busy, setBusy] = useState(false);
 
@@ -133,13 +132,7 @@ function MoveDialog({ item, onClose }: { item: Item; onClose: () => void }) {
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
-          // Re-wrap the key for the new folder, so whoever that folder is shared with can open it.
-          const parent = target ? items.find((i) => i.id === target) : undefined;
-          await api(`/nodes/${item.id}`, {
-            method: "PATCH",
-            body: { parentId: target || null, parentKey: parent ? await wrapKey(parent.key, item.key) : undefined },
-          });
-          await refresh();
+          await moveItem(item, target || null);
           onClose();
         }}
       >
