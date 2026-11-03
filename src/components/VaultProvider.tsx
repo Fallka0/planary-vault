@@ -106,7 +106,7 @@ interface VaultState {
   uploads: UploadItem[];
   enqueue: (files: File[], parentId: string | null, existing?: Item) => void;
   /** Saves a note: a new one (returns its id) or a new version of `existing`. Encrypted like any file. */
-  saveNote: (text: string, to: { name: string; parentId: string | null } | { existing: Item }) => Promise<string>;
+  saveNote: (text: string, to: { name: string; parentId: string | null } | { existing: Item }, mime?: string) => Promise<string>;
   retryUpload: (id: string) => void;
   clearUploads: () => void;
   currentFolder: string | null;
@@ -526,11 +526,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const retryUpload = useCallback((id: string) => patchUpload(id, { state: "waiting", done: 0, error: undefined }), [patchUpload]);
 
   const saveNote = useCallback(
-    async (text: string, to: { name: string; parentId: string | null } | { existing: Item }) => {
+    async (text: string, to: { name: string; parentId: string | null } | { existing: Item }, mime = "text/plain") => {
       if (!master.current) throw new Error("vault is locked");
       const existing = "existing" in to ? to.existing : undefined;
       const parentId = existing ? existing.parentId : (to as { parentId: string | null }).parentId;
-      const file = new File([text], existing?.name ?? (to as { name: string }).name, { type: "text/plain" });
+      const file = new File([text], existing?.name ?? (to as { name: string }).name, { type: existing?.mime ?? mime });
       const id = await uploadFile({
         file,
         masterKey: master.current,

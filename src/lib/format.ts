@@ -80,8 +80,17 @@ export function initials(name: string): string {
   return (words[0][0] + words[words.length - 1][0]).toUpperCase();
 }
 
+/** A formatted note made in Vault: an HTML page, marked by this type. */
+export const NOTE_MIME = "text/html; variant=planary-note";
+
+/** The name as shown: a note without its ".html". */
+export function shownName(name: string, mime = "") {
+  return mime === NOTE_MIME ? name.replace(/\.html?$/i, "") : name;
+}
+
 /** "PDF", "JPG"… shown in the badge instead of an icon. */
-export function typeBadge(name: string): string {
+export function typeBadge(name: string, mime = ""): string {
+  if (mime === NOTE_MIME) return "NOTE";
   const ext = name.includes(".") ? name.split(".").pop()! : "";
   return (ext.slice(0, 4) || "FILE").toUpperCase();
 }
@@ -97,6 +106,7 @@ export function fileFamily(name: string, mime = ""): FileFamily {
 
 /** Details panel "Type" row. */
 export function typeLabel(name: string, mime: string, pages?: number): string {
+  if (mime === NOTE_MIME) return "Note";
   const badge = typeBadge(name);
   const family = fileFamily(name, mime);
   if (family === "pdf") return pages ? `PDF · ${pages} ${pages === 1 ? "page" : "pages"}` : "PDF";
