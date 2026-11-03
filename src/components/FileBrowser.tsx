@@ -63,7 +63,7 @@ function isTrashed(items: Map<string, Item>, i: Item): boolean {
 }
 
 export function FileBrowser({ scope }: { scope: Scope }) {
-  const { items, byId, query, setQuery, setCurrentFolder, createFolder } = useVault();
+  const { items, byId, query, setQuery, setCurrentFolder, createFolder, saveNote } = useVault();
   const router = useRouter();
   const actions = useItemActions();
   const picker = useUploadPicker();
@@ -72,6 +72,7 @@ export function FileBrowser({ scope }: { scope: Scope }) {
   const [sort, setSort] = useState<Sort>("modified");
   const [searchIn, setSearchIn] = useState<SearchIn>("all");
   const [newFolder, setNewFolder] = useState(false);
+  const [newNote, setNewNote] = useState(false);
 
   const folderId = scope.kind === "folder" ? scope.id : null;
   useEffect(() => {
@@ -207,6 +208,9 @@ export function FileBrowser({ scope }: { scope: Scope }) {
               <button type="button" className="pill pill-primary pill-lg" onClick={picker.open}>
                 Choose files
               </button>
+              <button type="button" className="pill pill-text" onClick={() => setNewNote(true)}>
+                New note
+              </button>
               <button type="button" className="pill pill-text" onClick={() => setNewFolder(true)}>
                 New folder
               </button>
@@ -234,6 +238,11 @@ export function FileBrowser({ scope }: { scope: Scope }) {
                   <Lock />
                   Encrypted
                 </span>
+                {(scope.kind === "all" || (scope.kind === "folder" && !folder?.incoming)) && (
+                  <button type="button" className="pill pill-outline pill-md" onClick={() => setNewNote(true)}>
+                    New note
+                  </button>
+                )}
                 {scope.kind === "folder" && !folder?.incoming && (
                   <button type="button" className="pill pill-outline pill-md d-only" onClick={() => setNewFolder(true)}>
                     New folder
@@ -408,6 +417,20 @@ export function FileBrowser({ scope }: { scope: Scope }) {
             await createFolder(name, scope.kind === "folder" ? scope.id : null);
           }}
           onClose={() => setNewFolder(false)}
+        />
+      )}
+      {newNote && (
+        <NameDialog
+          title="New note"
+          label="Title"
+          confirm="Create"
+          onSubmit={async (title) => {
+            // A note is an encrypted text file; the extension makes it open anywhere once downloaded.
+            const name = /\.(txt|md)$/i.test(title) ? title : `${title}.txt`;
+            const id = await saveNote("", { name, parentId: scope.kind === "folder" ? scope.id : null });
+            router.push(`/file/${id}`);
+          }}
+          onClose={() => setNewNote(false)}
         />
       )}
     </>

@@ -105,6 +105,8 @@ interface VaultState {
   // uploads
   uploads: UploadItem[];
   enqueue: (files: File[], parentId: string | null, existing?: Item) => void;
+  /** Saves a note: a new one (returns its id) or a new version of `existing`. Encrypted like any file. */
+  saveNote: (text: string, to: { name: string; parentId: string | null } | { existing: Item }) => Promise<string>;
   retryUpload: (id: string) => void;
   clearUploads: () => void;
   currentFolder: string | null;
@@ -523,6 +525,27 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const retryUpload = useCallback((id: string) => patchUpload(id, { state: "waiting", done: 0, error: undefined }), [patchUpload]);
 
+  const saveNote = useCallback(
+    async (text: string, to: { name: string; parentId: string | null } | { existing: Item }) => {
+      if (!master.current) throw new Error("vault is locked");
+      const existing = "existing" in to ? to.existing : undefined;
+      const parentId = existing ? existing.parentId : (to as { parentId: string | null }).parentId;
+      const file = new File([text], existing?.name ?? (to as { name: string }).name, { type: "text/plain" });
+      const id = await uploadFile({
+        file,
+        masterKey: master.current,
+        parentId,
+        parentKey: parentId ? itemsRef.current.find((i) => i.id === parentId)?.key : undefined,
+        existing: existing ? { id: existing.id, key: existing.key, meta: existing.meta as FileMeta } : undefined,
+        signal: new AbortController().signal,
+        onProgress: () => undefined,
+      });
+      await refresh();
+      return id;
+    },
+    [refresh],
+  );
+
   const clearUploads = useCallback(() => {
     controllers.current.forEach((c) => c.abort());
     setUploads([]);
@@ -561,6 +584,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     deleteForever,
     uploads,
     enqueue,
+    saveNote,
     retryUpload,
     clearUploads,
     currentFolder,

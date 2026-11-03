@@ -731,3 +731,8 @@ a.storage { color: inherit; text-decoration: none; }
 
 .pager-icon { width: 14px; height: 14px; }
 @media (max-width: 640px) { .pager .zoom > * { display: none; } }
+
+/* notes: an encrypted text file, edited in place */
+.note-text { flex: 1; min-height: 320px; width: 100%; resize: none; border: 0; outline: none; background: transparent; color: var(--text); padding: 32px clamp(20px, 4vw, 48px); font: inherit; font-size: 16px; line-height: 1.7; }
+.note-text::placeholder { color: var(--muted); }
+.note .preview-bar .error-text { color: var(--danger); }
