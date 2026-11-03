@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useVault, type Item } from "@/components/VaultProvider";
 import { useItemActions } from "@/components/ItemActions";
 import { Preview, type Decrypted } from "@/components/Preview";
+import { isNote, NoteEditor } from "@/components/NoteEditor";
 import { ShareDialog } from "@/components/ShareDialog";
 import { Menu } from "@/components/Menu";
 import { ArrowUpRight, ChevronLeft, Close, Download, Lock, More } from "@/components/Icons";
@@ -34,8 +35,8 @@ export default function FilePage() {
   }, [item, items.length, router]);
 
   if (!item || item.kind !== "file") return null;
-  // A new version means new bytes: remount the preview.
-  return <FileView key={`${item.id}:${item.version}`} item={item} />;
+  // A new version means new bytes: remount the preview. A note saves its own versions and keeps its editor.
+  return <FileView key={isNote(item) ? item.id : `${item.id}:${item.version}`} item={item} />;
 }
 
 function FileView({ item }: { item: Item }) {
@@ -117,7 +118,11 @@ function FileView({ item }: { item: Item }) {
       </header>
 
       <div className="detail-body">
-        <Preview name={item.name} mime={item.mime} load={load} onReady={onReady} />
+        {isNote(item) ? (
+          <NoteEditor item={item} canEdit={canEdit} onReady={onReady} />
+        ) : (
+          <Preview name={item.name} mime={item.mime} load={load} onReady={onReady} />
+        )}
         <aside className="side">
           <div className="seg" role="tablist" aria-label="File info">
             {(["details", "versions", "activity"] as const).map((t) => (

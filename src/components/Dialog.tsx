@@ -100,8 +100,10 @@ export function NameDialog({
           try {
             await onSubmit(v);
             onClose();
-          } catch {
-            setError("That didn't work. Try again.");
+          } catch (e) {
+            // Staff restrictions and a full vault say why; anything else is a retry.
+            const message = (e as Error).message ?? "";
+            setError(message.includes("turned off") ? message : message === "vault is full" ? "Your vault is full." : "That didn't work. Try again.");
             setBusy(false);
           }
         }}
